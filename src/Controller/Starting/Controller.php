@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Controller;
+namespace App\Controller\Starting;
 
+use App\Controller\ControllerInterface;
 use App\Form\FlattenFormErrors;
 use function str_contains;
 use Symfony\Component\Form\Extension\Core\Type\DateType;
@@ -18,7 +19,7 @@ use Symfony\Component\Validator\Constraints\Length;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Twig\Environment;
 
-#[Route(path:'/example', methods:['POST', 'GET'])]
+#[Route(path:'/first-example', methods:['POST', 'GET'])]
 class Controller implements ControllerInterface
 {
     public function __invoke(

@@ -14,8 +14,8 @@ Roteiro:
 - Exemplo básico
 - Validação de entradas
 - Formulários reutilizáveis
-- Resultado customizado
-- Passando parâmetros para tipos
+  - Passando parâmetros para tipos
+  - Resultado customizado
 - Transformações
 - Truques para BFF
 
@@ -181,7 +181,230 @@ valide que tem mais de 5 caracteres ficaria:
 Formulários reutilizáveis
 -------------------------
 
+Algo comum em quase todo sistema será que alguns endpoints terão entradas similares ou irão ter campos que tem
+o mesmo proposito ou validação entre eles. Para tratar essas situações podemos mover a definição de um
+formulário para uma classe dedicada que irá montar os formulários/adicionar validações e os Controllers e
+outros formulários podem simplesmente referenciá-las.
 
+Vamos dizer que queremos aproveitar a definição do formulário de tarefas que temos hoje, para isso vamos criar
+uma nova classe que estende [`AbstractType`][abst-type], essa classe será como abaixo:
+
+```php
+<?php
+
+namespace App\Controller\Reusing;
+
+use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\DateType;
+use Symfony\Component\Form\Extension\Core\Type\SubmitType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Validator\Constraints\GreaterThanOrEqual;
+use Symfony\Component\Validator\Constraints\Length;
+use Symfony\Component\Validator\Constraints\NotBlank;
+
+class TaskType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('name', TextType::class, ['constraints' => [
+                new NotBlank(),
+                new Length(min: 5),
+            ]])
+            ->add('dueDate', DateType::class, [
+                'widget' => 'single_text',
+                'required' => false,
+                'constraints' => [new GreaterThanOrEqual(
+                    new \DateTime('today'),
+                    message: 'Due Date can not be in the past'
+                )],
+            ])
+            ->add('save', SubmitType::class);
+    }
+}
+```
+
+E agora podemos criar um `UpdateTaskType` que "estende" `TaskType`, mas pede o `ID` da tarefa para
+atualizar. Esse novo `Type` fica assim:
+
+```php
+<?php
+
+namespace App\Controller\Reusing;
+
+use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\IntegerType;
+use Symfony\Component\Form\FormBuilderInterface;
+use Symfony\Component\Validator\Constraints\NotBlank;
+
+class UpdateTaskType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('id', IntegerType::class, [
+                'priority' => 1, // just to put it into the top
+                'constraints' => [new NotBlank()],
+            ]);
+    }
+
+    public function getParent(): string
+    {
+        return TaskType::class;
+    }
+}
+```
+
+No Controller vamos fazer uma alteração para usar o `UpdateTaskType` no lugar de montar no método, no final
+tudo fica igual exceto a montagem:
+```php
+class Controller implements ControllerInterface
+{
+    public function __invoke(/** ... */): Response {
+        /** @var FormInterface */
+        $form = $formFactory->createNamedBuilder('form', UpdateTaskType::class)
+            ->getForm();
+
+        $form->handleRequest($request);
+        if ($form->isSubmitted() && $form->isValid()) {
+            return new JsonResponse($form->getData());
+        }
+        // ...
+```
+
+O `createNamedBuilder` funcional igual ao `createBuilder`, exceto que ele permite dar um nome para o
+formulário no lugar de deixar o nome definido no `Type` ou o autogerado.
+
+O resultado disso é como abaixo:
+
+![extended form](./assets/extend-form.png)
+
+Vamos dizer que agora queremos poder vincular qual é o usuário responsável pela tarefa assim como quem são as
+pessoas interessadas na tarefa. Esses dois são informados passando o nome de usuário, e vamos precisar validar
+que é um usuário válido, a regra será que aceita apenas letras minusculas e números.
+
+Para isso vamos criar um `Type` chamado `UsernameType` para fazer essa validação:
+```php
+<?php
+
+namespace App\Controller\Reusing;
+
+use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
+use Symfony\Component\OptionsResolver\OptionsResolver;
+use Symfony\Component\Validator\Constraints\Length;
+use Symfony\Component\Validator\Constraints\Regex;
+
+class UsernameType extends AbstractType
+{
+    public function getParent(): string
+    {
+        return TextType::class;
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefault('constraints', [
+            new Length(min: 5),
+            new Regex(
+                '/^[a-z0-9]+$/',
+                message: 'Username must constain only letters and numbers'
+            ),
+        ]);
+    }
+}
+```
+
+Feito isso podemos adicionar no `TaskType` da seguinte forma:
+```php
+            ->add('assignee', UsernameType::class)
+            ->add('stackholders', CollectionType::class, [
+                'entry_type' => UsernameType::class,
+                'allow_add' => true,
+                'allow_delete' => true,
+            ])
+```
+
+Agora se renderizamos esse formulário e tentar informar valores incorretos teremos a seguinte imagem:
+
+![form with assignee and stackholders](./assets/form-with-assignee.png)
+
+Como nesse formulário tivemos um campo que se repete usamos o [`CollectionType`][coll-type] que é a forma como
+o Symfony permite adicionar coleções de objetos, aqui estamos usando apenas um valor, mas poderia ser um
+`FormType` mais complexo como uma versão do `TaskType`.
+
+### Resultados customizados
+
+Podendo montar formulários, criar tipos customizados e reutilizar esses formulários podemos explorar uma
+funcionalidade muito importante do Symfony Forms, que é poder informar uma classe de dados (`data_class`) para
+ele alimentar no lugar de retornar um vetor.
+
+Para uma classe poder ser usada como `data_class` duas coisas são necessárias:
+- a classe não pode ter argumentos obrigatórios no construtor
+- todos as propriedades que forem alimentados pelo `FormType` precisam ser públicas, ou terem um "setter"
+  público.
+
+Quase qualquer classe consegue atender esses requisitos, mas a minha recomendação seria que sejam usados
+[DTOs][dto] no lugar de entidades, primeiro porque esse tipo de objeto é pensando para isso, e evita que o
+estado das entidades fique inválido, mesmo que temporariamente, enquanto o Symfony Forms está alimentando e
+validando os campos.
+
+Um DTO que poderia ser usado para o `UpdateTaskType` que temos agora seria assim:
+
+```php
+<?php
+
+namespace App\Controller\DataClass;
+
+class TaskDTO
+{
+    private int $id;
+    private string $name;
+    private ?\DateTime $dueDate = null;
+    private string $assignee;
+    /** @var string[] */
+    private array $stackholders = [];
+
+    public function setId(int $id): void
+    {
+        $this->id = $id;
+    }
+
+    public function setName(string $name): void
+    {
+        $this->name = $name;
+    }
+
+    public function setDueDate(?\DateTime $dueDate): void
+    {
+        $this->dueDate = $dueDate;
+    }
+
+    public function setAssignee(string $assignee): void
+    {
+        $this->assignee = $assignee;
+    }
+
+    /** @param string[] $stackholders */
+    public function setStackholders(array $stackholders): void
+    {
+        $this->stackholders = $stackholders;
+    }
+
+    // getters
+}
+```
+
+Para o Symfony Forms usar esse DTO basta adicionar o método `configureOptions` e configurar o campo
+`data_class`, como abaixo:
+
+```php
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefault('data_class', TaskDTO::class);
+    }
+```
 
 [val-host]: https://symfony.com/doc/current/reference/constraints/Hostname.html
 [val-luhn]: https://symfony.com/doc/current/reference/constraints/Luhn.html
@@ -190,11 +413,13 @@ Formulários reutilizáveis
 [Symfony]: https://symfony.com/
 [BFF]: https://samnewman.io/patterns/architectural/bff/
 [form-factory]: https://github.com/symfony/form/blob/0a1a3ea071a216e2902cebe0b47750ca51f12f27/FormFactory.php#L17
+[abst-type]: https://github.com/symfony/symfony/blob/8084eb83a44a3639a95f0860456d737b7f2751dd/src/Symfony/Component/Form/AbstractType.php#L21
 [formulario-reutilizavel]: #formulários-reutilizáveis
 [truques-bff]: #
 [twig-bundle]: https://symfony.com/components/Twig%20Bundle
 [validacao-entradas]: #validação-de-entradas
 [transformacoes]: #
 [symfony-validator]: https://symfony.com/doc/current/validation.html
+[coll-type]: https://symfony.com/doc/current/reference/forms/types/collection.html
 
 <!-- vim: textwidth=110 colorcolumn=111
