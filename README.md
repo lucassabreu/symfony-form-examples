@@ -406,6 +406,63 @@ Para o Symfony Forms usar esse DTO basta adicionar o método `configureOptions` 
     }
 ```
 
+Por padrão o Symfony Forms vai tentar usar atribuir diretamente na propriedade ou método com o mesmo nome da
+entrada na classe de dados, mas caso esteja migrando um formulário para usar o Symfony Forms, ou simplesmente
+tiver algum padrão nos campos que não seja o mesmo usado para o `data_class` então pode informar qual a
+propriedade correta usando a opção `property_path`.
+
+Digamos que no formulário original tivéssemos um prefixo para indicar o tipo, mas a `TaskDTO` continua igual,
+então o `Type` ficaria como abaixo:
+
+```php
+<?php
+
+namespace App\Controller\DataClass;
+
+// ...
+
+class PropertyPathType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('int_id', IntegerType::class, [
+                'property_path' => 'id',
+                'constraints' => [new NotBlank()],
+            ])
+            ->add('str_name', TextType::class, [
+                'property_path' => 'name',
+                'constraints' => [
+                    new NotBlank(),
+                    new Length(min: 5),
+                ],
+            ])
+            ->add('dat_due_date', DateType::class, [
+                'property_path' => 'dueDate',
+                'widget' => 'single_text',
+                'required' => false,
+                'constraints' => [new GreaterThanOrEqual(
+                    new \DateTime('today'),
+                    message: 'Due Date can not be in the past'
+                )],
+            ])
+            ->add('str_assignee', UsernameType::class, ['property_path' => 'assignee'])
+            ->add('arr_stackholders', CollectionType::class, [
+                'property_path' => 'stackholders',
+                'entry_type' => UsernameType::class,
+                'allow_add' => true,
+                'allow_delete' => true,
+            ])
+            ->add('save', SubmitType::class);
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefault('data_class', TaskDTO::class);
+    }
+}
+```
+
 [val-host]: https://symfony.com/doc/current/reference/constraints/Hostname.html
 [val-luhn]: https://symfony.com/doc/current/reference/constraints/Luhn.html
 [val-ip]: https://symfony.com/doc/current/reference/constraints/Ip.html
