@@ -503,6 +503,21 @@ ficariam como abaixo:
 ```php
 <?php
 
+class PhoneType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('areaCode', IntegerType::class)
+            ->add('number', IntegerType::class);
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefault('data_class', Phone::class);
+    }
+}
+
 class UserType extends AbstractType
 {
     public function buildForm(FormBuilderInterface $builder, array $options): void
@@ -516,21 +531,6 @@ class UserType extends AbstractType
     public function configureOptions(OptionsResolver $resolver): void
     {
         $resolver->setDefault('data_class', UserDTO::class);
-    }
-}
-
-class PhoneType extends AbstractType
-{
-    public function buildForm(FormBuilderInterface $builder, array $options): void
-    {
-        $builder
-            ->add('areaCode', IntegerType::class)
-            ->add('number', IntegerType::class);
-    }
-
-    public function configureOptions(OptionsResolver $resolver): void
-    {
-        $resolver->setDefault('data_class', Phone::class);
     }
 }
 ```
