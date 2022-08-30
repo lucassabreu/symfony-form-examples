@@ -14,7 +14,6 @@ Roteiro:
 - Exemplo básico
 - Validação de entradas
 - Formulários reutilizáveis
-  - Passando parâmetros para tipos
   - Resultado customizado
 - Transformações
 - Truques para BFF
@@ -463,6 +462,218 @@ class PropertyPathType extends AbstractType
 }
 ```
 
+Transformações
+--------------
+
+Agora que estamos trabalhando com tipos mais complexos, ou ao menos estamos usando DTOs que podem estar
+esperando [`Value Objects`][value-object] então encontramos um problema que é: Como converter tipos primitivos
+do formulário para classes mais especializadas?
+
+Se o o `Value Object` que estamos falando for uma composição de tipos, então o que precisamos fazer é
+simplesmente criar um `FormType` especifico para ele e similar ao fizemos no `UsernameType` indicar esse tipo
+como a entrada.
+
+Num exemplo prático vamos dizer que temos um formulário para cadastrar usuários, que é representado no DTO
+abaixo:
+
+```php
+<?php
+
+class Phone
+{
+    private int $areaCode;
+    private int $number;
+    // getters & setters
+}
+
+class UserDTO {
+    private string $username;
+    private string $name;
+    private Phone $phone;
+    // getters & setters
+}
+```
+
+Para podemos receber um `UserDTO` direto do Forms, precisaremos de dois `FormTypes`, um para cada classe, e
+ficariam como abaixo:
+
+```php
+<?php
+
+class UserType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('username', UsernameType::class)
+            ->add('name', TextType::class)
+            ->add('phone', PhoneType::class);
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefault('data_class', UserDTO::class);
+    }
+}
+
+class PhoneType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('areaCode', IntegerType::class)
+            ->add('number', IntegerType::class);
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefault('data_class', Phone::class);
+    }
+}
+```
+
+Se renderizarmos esse formulários teremos o seguinte resultado:
+
+![user form](./assets/user-form.png)
+
+Caso fosse um `Value Object` do "apenas" encapsula um valor para garantir que está válido, como por exemplo
+`Money`, podemos criar um `FormType` que aceita uma entrada inteira e a converte para `Money` antes de passar
+para o DTO. Para isso vamos adicionar um `ModelTransformer` no `FormType`, e ficará assim:
+
+```php
+<?php
+
+use Symfony\Component\Form\CallbackTransformer;
+
+class MoneyType extends AbstractType
+{
+    public function getParent(): string { return IntegerType::class; }
+
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder->addModelTransformer(new CallbackTransformer(
+            transform: fn ($value) => $value instanceof Money ? $value->value : null,
+            reverseTransform: fn ($value) => is_null($value) ? null : new Money($value),
+        ));
+    }
+}
+```
+
+Truques para BFF
+----------------
+
+Por mais que o Symfony Forms parece uma boa opção para validação de entradas de APIs, é importante entender
+que esse não era o propósito original dele, e por isso existem alguns comportamentos que não casam tão bem.
+
+A principal é que ele espera receber as entradas via `form-data`, isso virá um problema se esperarmos um
+`Content-type` diferente como `XML` ou `JSON`. Mas é uma limitação simples de resolver, tudo que precisamos
+fazer é ler o conteúdo da requisição e alimentar ela na propriedade `request` da `Request`, como abaixo:
+
+```php
+    public function __invoke(Request $request): Response
+    {
+        $json = json_decode($request->getContent(), flags: JSON_THROW_ON_ERROR|JSON_OBJECT_AS_ARRAY);
+        $request->request = new \Symfony\Component\HttpFoundation\ParameterBag($json);
+        // ...
+    }
+```
+
+Com a lógica acima o `handleRequest` vai conseguir validar o `JSON` enviado.
+
+A segunda limitação é que o Symfony Forms espera que todo o formulário esteja abaixo de uma chave com o mesmo
+nome do `FormType`, isso quer dizer que se o formulário que criamos no inicio com `name` e `dueDate` não
+aceitaria um `form-data`: `name=new task&dueDate=2022-02-01`, o Symfony Forms espera que as chaves seja
+`form[name]` e `form[dueDate]`.
+
+Para contornar isso precisamos "pular uma etapa", e forçar o Form a aceitar que ouve o envio. Isso é feito
+chamando o método `summit` no lugar do `handleRequest`, e já passar os dados enviados.
+
+```php
+/** @var FormInterface */
+$form = $formFactory->createNamedBuilder('form', UserType::class)->getForm();
+$form->submit($request->request->all());
+
+if ($form->isValid()) {
+    return Response(status: 400);
+}
+$data = $form->getData());
+// ...
+```
+
+E o último problema é que não existe uma forma simples/padrão de converter os erros do formulário numa saída
+de API. O que o pacote espera é que simplesmente renderizemos o HTML dele novamente. Isso faz com que extrair
+os erros sejam um pouco inconivente, a classe abaixo representa uma forma de converter um formulário com erros
+para um `JSON`.
+
+```php
+<?php
+
+namespace App\Form;
+
+use Symfony\Component\Form\FormError;
+use Symfony\Component\Form\FormInterface;
+
+class FlattenFormErrors implements \JsonSerializable
+{
+    public readonly string $message;
+    public readonly array $validations;
+
+    public function __construct(FormInterface $form, string $name = null)
+    {
+        list('errors' => $this->validations, 'message' => $this->message) = $this->extract(
+            $form,
+            $name ?? $form->getName()
+        );
+    }
+
+    /** @return array{errors:array<string,string[]>,message:string} */
+    private function extract(FormInterface $form, string $prefix = ''): array
+    {
+        $errors = array_map(fn ($error) => $error->getMessage(), array_filter(
+            iterator_to_array($form->getErrors(deep: false)),
+            fn ($error) => $error instanceof FormError,
+        ));
+
+        $message = 0 === strlen($prefix) ? implode(PHP_EOL, $errors) : implode(
+            PHP_EOL . $form->getConfig()->getOption('label') ?: $form->getName() . ': ',
+            $errors
+        );
+
+        if (0 !== count($errors)) {
+            $errors = [$prefix ?: '.' => $errors];
+        }
+
+        foreach ($form->all() as $childForm) {
+            if (! $childForm instanceof FormInterface) {
+                continue;
+            }
+
+            list('message' => $childMessages, 'errors' => $childErrors) = $this->extract(
+                $childForm,
+                ($prefix ? $prefix . '.' : '') . $childForm->getName()
+            );
+
+            if (0 === count($childErrors)) {
+                continue;
+            }
+
+            $message .= PHP_EOL . $childMessages;
+            $errors += $childErrors;
+        }
+
+        return compact('message', 'errors');
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function jsonSerialize(): mixed
+    {
+        return ['message' => $this->message, 'validations' => $this->validations];
+    }
+}
+```
+
 [val-host]: https://symfony.com/doc/current/reference/constraints/Hostname.html
 [val-luhn]: https://symfony.com/doc/current/reference/constraints/Luhn.html
 [val-ip]: https://symfony.com/doc/current/reference/constraints/Ip.html
@@ -478,5 +689,6 @@ class PropertyPathType extends AbstractType
 [transformacoes]: #
 [symfony-validator]: https://symfony.com/doc/current/validation.html
 [coll-type]: https://symfony.com/doc/current/reference/forms/types/collection.html
+[value-object]: https://martinfowler.com/bliki/ValueObject.html
 
 <!-- vim: textwidth=110 colorcolumn=111

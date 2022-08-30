@@ -21,13 +21,10 @@ class FlattenFormErrors implements \JsonSerializable
     /** @return array{errors:array<string,string[]>,message:string} */
     private function extract(FormInterface $form, string $prefix = ''): array
     {
-        $errors = array_map(
-            fn ($error) => $error->getMessage(),
-            array_filter(
-                iterator_to_array($form->getErrors(deep: false)),
-                fn ($error) => $error instanceof FormError,
-            ),
-        );
+        $errors = array_map(fn ($error) => $error->getMessage(), array_filter(
+            iterator_to_array($form->getErrors(deep: false)),
+            fn ($error) => $error instanceof FormError,
+        ));
 
         $message = 0 === strlen($prefix) ? implode(PHP_EOL, $errors) : implode(
             PHP_EOL . $form->getConfig()->getOption('label') ?: $form->getName() . ': ',
