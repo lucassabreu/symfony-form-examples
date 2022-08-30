@@ -1,7 +1,7 @@
 Symfony Forms
 =============
 
-> ℹ️  Esse repositório foi criado para acompanhar essa apresentação para um time interno
+> ℹ️  Esse documento foi criado para acompanhar essa apresentação: https://docs.google.com/presentation/d/1E4WE3cwamdqiQzAY7MAsTnkbIC8Zv4trrvxu7YSaRXg/edit?usp=sharing
 
 O pacote [`symfony/form`][symfony-form] é um componente do [Symfony][] para trabalhar com formulários HTML,
 seja a geração de HTML ou a validação/processamento dos mesmos num servidor.
