@@ -155,7 +155,10 @@ $form = $formFactory->createBuilder()
         new Length(min: 5),
     ]])
     ->add('dueDate', DateType::class, ['widget' => 'single_text', 'constraints' => [
-        new GreaterThanOrEqual(new \DateTime('today'), message: 'Due Date can not be in the past'),
+        new GreaterThanOrEqual(
+            new \DateTime('today'),
+            message: 'Due Date can not be in the past'
+        ),
     ]])
     ->add('save', SubmitType::class)
     ->getForm();
