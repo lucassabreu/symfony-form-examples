@@ -642,23 +642,17 @@ class FlattenFormErrors implements \JsonSerializable
             $errors
         );
 
-        if (0 !== count($errors)) {
-            $errors = [$prefix ?: '.' => $errors];
-        }
+        if (0 !== count($errors)) { $errors = [$prefix ?: '.' => $errors]; }
 
         foreach ($form->all() as $childForm) {
-            if (! $childForm instanceof FormInterface) {
-                continue;
-            }
+            if (! $childForm instanceof FormInterface) { continue; }
 
             list('message' => $childMessages, 'errors' => $childErrors) = $this->extract(
                 $childForm,
                 ($prefix ? $prefix . '.' : '') . $childForm->getName()
             );
 
-            if (0 === count($childErrors)) {
-                continue;
-            }
+            if (0 === count($childErrors)) { continue; }
 
             $message .= PHP_EOL . $childMessages;
             $errors += $childErrors;
