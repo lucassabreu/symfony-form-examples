@@ -629,7 +629,6 @@ class FlattenFormErrors implements \JsonSerializable
         );
     }
 
-    /** @return array{errors:array<string,string[]>,message:string} */
     private function extract(FormInterface $form, string $prefix = ''): array
     {
         $errors = array_map(fn ($error) => $error->getMessage(), array_filter(
@@ -661,9 +660,6 @@ class FlattenFormErrors implements \JsonSerializable
         return compact('message', 'errors');
     }
 
-    /**
-     * {@inheritDoc}
-     */
     public function jsonSerialize(): mixed
     {
         return ['message' => $this->message, 'validations' => $this->validations];
