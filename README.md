@@ -693,5 +693,6 @@ class FlattenFormErrors implements \JsonSerializable
 [symfony-validator]: https://symfony.com/doc/current/validation.html
 [coll-type]: https://symfony.com/doc/current/reference/forms/types/collection.html
 [value-object]: https://martinfowler.com/bliki/ValueObject.html
+[dto]: https://martinfowler.com/eaaCatalog/dataTransferObject.html
 
 <!-- vim: textwidth=110 colorcolumn=111
